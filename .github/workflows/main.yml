@@ -1,0 +1,28 @@
+name: Build PSP
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ghcr.io/pspdev/pspdev:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          mkdir -p build
+          cd build
+          psp-cmake ..
+          make
+
+      - name: Upload EBOOT
+        uses: actions/upload-artifact@v4
+        with:
+          name: MarioKartPSP
+          path: build/EBOOT.PBP
