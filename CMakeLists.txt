@@ -13,11 +13,10 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    pspgum
-    pspgu
-    pspctrl
+    pspdebug
     pspdisplay
     pspge
+    pspctrl
     m
 )
 
