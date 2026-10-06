@@ -6,6 +6,7 @@ add_executable(MarioKartPSP main.c)
 target_link_libraries(MarioKartPSP PRIVATE
     pspgum
     pspgu
+    pspge
     pspdisplay
     pspctrl
     psppower
