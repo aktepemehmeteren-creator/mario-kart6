@@ -13,6 +13,7 @@
  *
  *   Ozel gucler: Mantar, Turbo Yildizi, Kabuk, Muz, Yildirim, Kalkan
  *
+ *   Karakterler: MARIO, LUIGI, PEACH, TOAD, YOSHI, BOWSER (her birinin ayri modeli ve ozellikleri var)
  *   Menu: YUKARI/ASAGI ile mod sec, X ile baslat
  *   Modlar: TEK KISILIK (5 bot) / TIME TRIAL (botsuz + ghost)
  *   Kayit: ms0:/PSP/SAVEDATA/MKPSP/  (en iyi tur, en iyi sure, galibiyet, ghost)
@@ -296,13 +297,16 @@ static void cone3(float cx, float cy, float cz, float r, float h, int sides, flo
 }
 
 /* ---------- Karakterler, pistler, temalar ---------- */
-static const unsigned kBody[NK] = { RGB(225, 35, 35), RGB(40, 90, 235), RGB(30, 175, 70), RGB(245, 205, 25), RGB(160, 70, 205), RGB(245, 135, 25) };
-static const unsigned kTrim[NK] = { RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(40, 40, 40), RGB(255, 255, 255), RGB(40, 40, 40) };
-static const char *charNames[NK] = { "RED", "BLUE", "GREEN", "YELLOW", "PURPLE", "ORANGE" };
+/* 0 MARIO, 1 LUIGI, 2 PEACH, 3 TOAD, 4 YOSHI, 5 BOWSER */
+static const unsigned kBody[NK] = { RGB(225, 35, 35), RGB(30, 175, 70), RGB(255, 130, 190), RGB(60, 110, 230), RGB(110, 220, 90), RGB(245, 150, 25) };
+static const unsigned kTrim[NK] = { RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 235, 120), RGB(255, 255, 255), RGB(255, 255, 255), RGB(40, 140, 50) };
+static const unsigned kSkin[NK] = { RGB(255, 208, 165), RGB(255, 208, 165), RGB(255, 218, 180), RGB(255, 215, 175), RGB(120, 225, 95), RGB(240, 195, 70) };
+static const unsigned kHat[NK]  = { RGB(225, 35, 35), RGB(30, 175, 70), RGB(250, 215, 80), RGB(245, 245, 250), RGB(110, 220, 90), RGB(210, 60, 25) };
+static const char *charNames[NK] = { "MARIO", "LUIGI", "PEACH", "TOAD", "YOSHI", "BOWSER" };
 /* karakter ozellikleri: hiz / ivme / direksiyon carpani */
-static const float cSpd[NK] = { 1.00f, 1.05f, 0.97f, 0.97f, 1.06f, 0.94f };
-static const float cAcc[NK] = { 1.00f, 0.92f, 1.12f, 1.00f, 0.88f, 1.15f };
-static const float cTrn[NK] = { 1.00f, 0.98f, 1.00f, 1.12f, 0.92f, 1.08f };
+static const float cSpd[NK] = { 1.00f, 0.99f, 0.95f, 0.92f, 0.96f, 1.08f };
+static const float cAcc[NK] = { 1.00f, 1.05f, 1.12f, 1.18f, 1.10f, 0.84f };
+static const float cTrn[NK] = { 1.00f, 1.02f, 1.10f, 1.14f, 1.12f, 0.88f };
 
 static int trackSel = 0, charSel = 0;
 static int kChar[NK];            /* kart slotu -> karakter (0 = oyuncu) */
@@ -410,8 +414,11 @@ static int groundEnd, roadStart, roadEnd;
 static int shellGStart, shellGCount, shellRStart, shellRCount, banStart, banCount, ghostStart, ghostCount3;
 static unsigned char padMark[M];
 
-static void buildKartMesh(unsigned body, unsigned trim) {
-    unsigned dark = RGB(30, 30, 34), grey = RGB(150, 150, 158), skin = RGB(255, 208, 165);
+static void buildKartMesh(int ch) {
+    unsigned body = kBody[ch], trim = kTrim[ch];
+    unsigned dark = RGB(30, 30, 34), grey = RGB(150, 150, 158), skin = kSkin[ch], hat = kHat[ch];
+    unsigned white = RGB(250, 250, 250), brown = RGB(80, 45, 20), overall = RGB(40, 70, 200);
+    /* ortak: sasi, tekerlekler, arka kanat, direksiyon */
     box3(0, 0.55f, 0, 1.55f, 0.28f, 0.75f, body);
     box3(1.9f, 0.45f, 0, 0.5f, 0.2f, 0.5f, body);
     box3(2.35f, 0.3f, 0, 0.16f, 0.07f, 1.05f, trim);
@@ -420,19 +427,86 @@ static void buildKartMesh(unsigned body, unsigned trim) {
     box3(-1.6f, 1.0f, -0.55f, 0.06f, 0.32f, 0.06f, dark);
     box3(-1.3f, 0.95f, 0, 0.3f, 0.25f, 0.5f, grey);
     for (int i = 0; i < 2; i++) {
-        float s = i ? 1.0f : -1.0f;
-        box3(1.25f, 0.42f, s * 1.0f, 0.42f, 0.42f, 0.22f, dark);
-        box3(1.25f, 0.42f, s * 1.23f, 0.2f, 0.2f, 0.02f, grey);
-        box3(-1.2f, 0.5f, s * 1.05f, 0.5f, 0.5f, 0.28f, dark);
-        box3(-1.2f, 0.5f, s * 1.34f, 0.24f, 0.24f, 0.02f, grey);
+        float sd = i ? 1.0f : -1.0f;
+        box3(1.25f, 0.42f, sd * 1.0f, 0.42f, 0.42f, 0.22f, dark);
+        box3(1.25f, 0.42f, sd * 1.23f, 0.2f, 0.2f, 0.02f, grey);
+        box3(-1.2f, 0.5f, sd * 1.05f, 0.5f, 0.5f, 0.28f, dark);
+        box3(-1.2f, 0.5f, sd * 1.34f, 0.24f, 0.24f, 0.02f, grey);
     }
-    box3(-0.2f, 1.0f, 0, 0.3f, 0.38f, 0.38f, trim);
-    box3(-0.2f, 1.62f, 0, 0.27f, 0.27f, 0.27f, skin);
-    box3(-0.2f, 1.78f, 0, 0.31f, 0.2f, 0.31f, body);
-    box3(0.1f, 1.62f, 0, 0.04f, 0.1f, 0.22f, dark);
-    box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, skin);
-    box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, skin);
     box3(0.5f, 1.05f, 0, 0.04f, 0.12f, 0.18f, dark);
+
+    /* karaktere ozel surucu */
+    switch (ch) {
+    case 0: case 1:     /* MARIO / LUIGI: sapka, biyik, tulum */
+        box3(-0.2f, 1.0f, 0, 0.3f, 0.38f, 0.38f, hat);
+        box3(-0.2f, 0.82f, 0, 0.31f, 0.18f, 0.39f, overall);
+        box3(-0.2f, 1.62f, 0, 0.27f, 0.27f, 0.27f, skin);
+        box3(-0.2f, 1.78f, 0, 0.31f, 0.2f, 0.31f, hat);
+        box3(0.12f, 1.74f, 0, 0.16f, 0.04f, 0.26f, hat);          /* siper */
+        box3(0.1f, 1.62f, 0, 0.04f, 0.1f, 0.22f, dark);           /* goz */
+        box3(0.12f, 1.52f, 0, 0.05f, 0.04f, 0.17f, brown);        /* biyik */
+        box3(0.14f, 1.58f, 0, 0.06f, 0.06f, 0.06f, skin);         /* burun */
+        box3(-0.2f, 1.82f, 0.28f, 0.03f, 0.05f, 0.05f, white);    /* sapka rozeti */
+        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, white);
+        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, white);
+        break;
+    case 2:             /* PEACH: elbise, sarı sac, tac */
+        box3(-0.2f, 0.95f, 0, 0.34f, 0.3f, 0.44f, body);
+        box3(-0.2f, 1.25f, 0, 0.28f, 0.14f, 0.34f, trim);
+        box3(-0.2f, 1.62f, 0, 0.27f, 0.27f, 0.27f, skin);
+        box3(-0.2f, 1.82f, 0, 0.3f, 0.1f, 0.3f, hat);             /* sac ustu */
+        box3(-0.46f, 1.55f, 0, 0.1f, 0.38f, 0.3f, hat);           /* sac arka */
+        box3(-0.2f, 1.96f, 0, 0.16f, 0.06f, 0.16f, RGB(255, 215, 40));   /* tac */
+        box3(-0.2f, 2.06f, 0, 0.04f, 0.06f, 0.04f, RGB(60, 120, 255));
+        box3(0.1f, 1.62f, 0, 0.04f, 0.1f, 0.22f, dark);
+        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, white);
+        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, white);
+        break;
+    case 3:             /* TOAD: kirmizi benekli buyuk mantar sapka */
+        box3(-0.2f, 1.0f, 0, 0.28f, 0.36f, 0.36f, white);
+        box3(-0.2f, 1.0f, 0, 0.29f, 0.3f, 0.37f, body);           /* yelek */
+        box3(-0.2f, 1.5f, 0, 0.24f, 0.22f, 0.24f, skin);
+        box3(-0.2f, 1.86f, 0, 0.5f, 0.3f, 0.5f, white);           /* mantar */
+        box3(-0.2f, 2.17f, 0, 0.18f, 0.03f, 0.18f, RGB(225, 35, 35));
+        box3(0.31f, 1.92f, 0, 0.03f, 0.12f, 0.12f, RGB(225, 35, 35));
+        box3(-0.2f, 1.92f, 0.51f, 0.12f, 0.12f, 0.03f, RGB(225, 35, 35));
+        box3(-0.2f, 1.92f, -0.51f, 0.12f, 0.12f, 0.03f, RGB(225, 35, 35));
+        box3(0.06f, 1.52f, 0, 0.04f, 0.08f, 0.18f, dark);
+        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, skin);
+        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, skin);
+        break;
+    case 4:             /* YOSHI: yesil govde, beyaz karin, uzun burun, kirmizi eyer */
+        box3(-0.2f, 0.95f, 0, 0.3f, 0.36f, 0.38f, body);
+        box3(0.12f, 0.9f, 0, 0.03f, 0.24f, 0.24f, white);         /* karin */
+        box3(-0.55f, 1.18f, 0, 0.14f, 0.08f, 0.36f, RGB(225, 35, 35));   /* eyer */
+        box3(0.0f, 1.62f, 0, 0.34f, 0.3f, 0.32f, skin);           /* bas */
+        box3(0.42f, 1.52f, 0, 0.22f, 0.16f, 0.26f, skin);         /* burun */
+        box3(0.64f, 1.58f, 0.0f, 0.03f, 0.04f, 0.08f, dark);
+        for (int i = 0; i < 2; i++) {
+            float sd = i ? 1.0f : -1.0f;
+            box3(0.14f, 1.95f, sd * 0.13f, 0.08f, 0.15f, 0.08f, white);   /* goz */
+            box3(0.2f, 1.98f, sd * 0.13f, 0.03f, 0.07f, 0.04f, dark);
+        }
+        box3(-0.3f, 1.8f, 0, 0.1f, 0.12f, 0.14f, RGB(225, 35, 35));    /* sirt dikeni */
+        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, skin);
+        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, skin);
+        break;
+    default:            /* BOWSER: buyuk govde, yesil sivri kabuk, boynuz */
+        box3(-0.25f, 1.05f, 0, 0.4f, 0.44f, 0.5f, body);
+        box3(-0.7f, 1.2f, 0, 0.16f, 0.42f, 0.54f, trim);          /* kabuk */
+        cone3(-0.72f, 1.6f, 0.34f, 0.12f, 0.36f, 4, 0.0f, white);
+        cone3(-0.72f, 1.6f, -0.34f, 0.12f, 0.36f, 4, 0.0f, white);
+        cone3(-0.72f, 1.62f, 0.0f, 0.12f, 0.4f, 4, 0.0f, white);
+        box3(0.0f, 1.72f, 0, 0.32f, 0.28f, 0.34f, skin);          /* bas */
+        box3(0.35f, 1.62f, 0, 0.14f, 0.13f, 0.22f, skin);         /* burun */
+        box3(-0.2f, 1.98f, 0, 0.3f, 0.1f, 0.3f, hat);             /* sac */
+        cone3(-0.05f, 2.0f, 0.24f, 0.07f, 0.3f, 4, 0.0f, white);  /* boynuz */
+        cone3(-0.05f, 2.0f, -0.24f, 0.07f, 0.3f, 4, 0.0f, white);
+        box3(0.12f, 1.74f, 0, 0.04f, 0.09f, 0.26f, dark);
+        box3(0.15f, 1.05f, 0.5f, 0.25f, 0.09f, 0.09f, skin);
+        box3(0.15f, 1.05f, -0.5f, 0.25f, 0.09f, 0.09f, skin);
+        break;
+    }
 }
 
 static void buildSparkMesh(void) {
@@ -623,13 +697,13 @@ static void buildMesh(void) {
     kartCount = 0;
     for (int i = 0; i < NK; i++) {
         kartStart[i] = nv;
-        buildKartMesh(kBody[kChar[i]], kTrim[kChar[i]]);
+        buildKartMesh(kChar[i]);
         kartCount = nv - kartStart[i];
     }
     /* ghost araci: yari saydam */
     pvAlpha = 140;
     ghostStart = nv;
-    buildKartMesh(kBody[ghostBestChar], kTrim[ghostBestChar]);
+    buildKartMesh(ghostBestChar);
     ghostCount3 = nv - ghostStart;
     pvAlpha = 255;
     boxStart = nv;
@@ -1889,11 +1963,17 @@ static void drawHUD(void) {
             int bx = 30 + i * 72, by = 52;
             if (i == charSel) rect(bx - 4, by - 4, 64, 72, RGB(255, 220, 50));
             rect(bx, by, 56, 64, RGBA(20, 30, 60, 235));
-            rect(bx + 6, by + 14, 44, 18, kBody[i]);
-            rect(bx + 12, by + 8, 16, 8, kTrim[i]);
-            rect(bx + 4, by + 30, 12, 12, RGB(30, 30, 34));
-            rect(bx + 40, by + 30, 12, 12, RGB(30, 30, 34));
-            rect(bx + 6, by + 46, 44, 4, scol(kBody[i], 0.6f));
+            rect(bx + 17, by + 8, 22, 18, kSkin[i]);                    /* yuz */
+            rect(bx + 15, by + 3, 26, 8, kHat[i]);                      /* sapka / sac */
+            if (i == 3) { rect(bx + 11, by + 1, 34, 9, kHat[i]); rect(bx + 24, by + 2, 8, 4, RGB(225, 35, 35)); }
+            if (i == 5) { rect(bx + 17, by - 1, 4, 6, RGB(250, 250, 250)); rect(bx + 35, by - 1, 4, 6, RGB(250, 250, 250)); }
+            rect(bx + 23, by + 16, 3, 3, RGB(30, 30, 34));
+            rect(bx + 30, by + 16, 3, 3, RGB(30, 30, 34));
+            if (i <= 1) rect(bx + 22, by + 21, 12, 2, RGB(80, 45, 20));  /* biyik */
+            rect(bx + 6, by + 28, 44, 14, kBody[i]);
+            rect(bx + 4, by + 40, 12, 12, RGB(30, 30, 34));
+            rect(bx + 40, by + 40, 12, 12, RGB(30, 30, 34));
+            rect(bx + 6, by + 54, 44, 4, scol(kBody[i], 0.6f));
         }
         text(W / 2 - textWidth(charNames[charSel], 18, 5) / 2, 132, 18, 30, 5, charNames[charSel], RGB(255, 255, 255));
         {
@@ -1958,7 +2038,8 @@ static void drawHUD(void) {
         int rank = (state == 2) ? finalRank : calcRank();
         snprintf(buf, sizeof(buf), "POS %d/%d", rank, NK);
         text(8, 8, 11, 18, 3, buf, rank == 1 ? RGB(255, 215, 40) : RGB(255, 255, 255));
-        text(8, 28, 8, 14, 2, "5 BOT", RGB(120, 220, 255));
+        snprintf(buf, sizeof(buf), "%s  5 BOT", charNames[charSel]);
+        text(8, 28, 8, 14, 2, buf, RGB(120, 220, 255));
     } else {
         text(8, 8, 8, 14, 2, "TIME TRIAL", RGB(255, 215, 40));
         if (saveData.bestTT[trackSel] > 0) {
