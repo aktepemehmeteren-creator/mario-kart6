@@ -407,7 +407,7 @@ static void buildTrackPath(void) {
 }
 
 static int nFlat = 0, nScene = 0;
-static int kartStart[NK], kartCount = 0;
+static int kartStart[NK], kartCnt[NK];   /* her karakterin vertex sayisi farkli */
 static int boxStart, boxCount, coneStart, coneCount, flameStart, flameCount, shadowStart, shadowCount;
 static int sparkStart, sparkCount;
 static int groundEnd, roadStart, roadEnd;
@@ -694,11 +694,10 @@ static void buildMesh(void) {
     nScene = nv;
 
     /* --- arac meshleri --- */
-    kartCount = 0;
     for (int i = 0; i < NK; i++) {
         kartStart[i] = nv;
         buildKartMesh(kChar[i]);
-        kartCount = nv - kartStart[i];
+        kartCnt[i] = nv - kartStart[i];
     }
     /* ghost araci: yari saydam */
     pvAlpha = 140;
@@ -1875,7 +1874,7 @@ static void render3D(void) {
         modelAt(k->x, bob, k->z, yaw);
         sceGumRotateX(k->pitch);
         sceGumRotateZ(k->lean);
-        sceGumDrawArray(GU_TRIANGLES, VF3, kartCount, 0, &mesh[kartStart[i]]);
+        sceGumDrawArray(GU_TRIANGLES, VF3, kartCnt[i], 0, &mesh[kartStart[i]]);
         if (k->boostT > 0) {
             ScePspFVector3 t, sc;
             t.x = -1.9f; t.y = 0.7f + 0.05f * sinf(tAnim * 32.0f + i); t.z = 0;
