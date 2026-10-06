@@ -1,15 +1,17 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.5)
 project(MarioKartPSP C)
 
 add_executable(MarioKartPSP main.c)
 
 target_link_libraries(MarioKartPSP PRIVATE
+    pspdebug
+    pspdisplay
+    pspge
     pspgum
     pspgu
-    pspge
-    pspdisplay
     pspctrl
     psppower
+    pspaudio
     m
 )
 
