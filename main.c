@@ -708,6 +708,7 @@ static int kartRank(int who) {
     return r;
 }
 static void initRace(void);
+static int addBanana(float x, float z);
 
 static int randomItem(void) {
     int rank = calcRank();
