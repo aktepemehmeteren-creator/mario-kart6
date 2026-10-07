@@ -332,6 +332,7 @@ static const float ctrl0[12][2] = {
     {60, 260}, {-40, 330}, {-180, 300}, {-260, 180}, {-200, 60}, {-100, 40} };
 static float ctrl[24][2];
 static int nCtrl = 12;
+static int mirrorMode = 0; /* Mirror pist modu: buildTrackPath tarafindan kullanilir */
 static float trackSC = 1.3f;
 typedef struct { float rx, rz, e, k, ph; } TrackShape;
 static const TrackShape shapes[NTRACKS] = {
@@ -777,7 +778,6 @@ static unsigned prevB = 0;
 static int gameMode = GAME_RACE;
 static int menuSel = 0;
 static int diffSel = 2;         /* 50, 100, 150, Mirror */
-static int mirrorMode = 0;
 static int cupSel = 0;
 static int champRace = 0;
 static int champPoints[NK];
