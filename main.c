@@ -11,11 +11,11 @@
  *   START          : duraklat / devam et
  *   SELECT         : bitis ekraninda yeniden baslat
  *
- *   Ozel gucler: Mantar, Turbo Yildizi, Kabuk, Muz, Yildirim, Kalkan
+ *   Ozel gucler: Mantar, Turbo Yildizi, Yesil/Kirmizi Kabuk, Muz, Yildirim, Kalkan
+ *   Gelismis: PNG texture cache/atlas/UV, dinamik sky, bulut, AI savunma-saldiri, kupa, kariyer, ghost/save
  *
- *   Karakterler: MARIO, LUIGI, PEACH, TOAD, YOSHI, BOWSER (her birinin ayri modeli ve ozellikleri var)
  *   Menu: YUKARI/ASAGI ile mod sec, X ile baslat
- *   Modlar: TEK KISILIK (5 bot) / TIME TRIAL (botsuz + ghost)
+ *   Modlar: TEK KISILIK / TIME TRIAL + GHOST / CHAMPIONSHIP / CAREER
  *   Kayit: ms0:/PSP/SAVEDATA/MKPSP/  (en iyi tur, en iyi sure, galibiyet, ghost)
 
  */
@@ -31,6 +31,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 PSP_MODULE_INFO("MarioKartPSP", 0, 1, 1);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
@@ -297,16 +300,13 @@ static void cone3(float cx, float cy, float cz, float r, float h, int sides, flo
 }
 
 /* ---------- Karakterler, pistler, temalar ---------- */
-/* 0 MARIO, 1 LUIGI, 2 PEACH, 3 TOAD, 4 YOSHI, 5 BOWSER */
-static const unsigned kBody[NK] = { RGB(225, 35, 35), RGB(30, 175, 70), RGB(255, 130, 190), RGB(60, 110, 230), RGB(110, 220, 90), RGB(245, 150, 25) };
-static const unsigned kTrim[NK] = { RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 235, 120), RGB(255, 255, 255), RGB(255, 255, 255), RGB(40, 140, 50) };
-static const unsigned kSkin[NK] = { RGB(255, 208, 165), RGB(255, 208, 165), RGB(255, 218, 180), RGB(255, 215, 175), RGB(120, 225, 95), RGB(240, 195, 70) };
-static const unsigned kHat[NK]  = { RGB(225, 35, 35), RGB(30, 175, 70), RGB(250, 215, 80), RGB(245, 245, 250), RGB(110, 220, 90), RGB(210, 60, 25) };
-static const char *charNames[NK] = { "MARIO", "LUIGI", "PEACH", "TOAD", "YOSHI", "BOWSER" };
+static const unsigned kBody[NK] = { RGB(225, 35, 35), RGB(40, 90, 235), RGB(30, 175, 70), RGB(245, 205, 25), RGB(160, 70, 205), RGB(245, 135, 25) };
+static const unsigned kTrim[NK] = { RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(40, 40, 40), RGB(255, 255, 255), RGB(40, 40, 40) };
+static const char *charNames[NK] = { "RED", "BLUE", "GREEN", "YELLOW", "PURPLE", "ORANGE" };
 /* karakter ozellikleri: hiz / ivme / direksiyon carpani */
-static const float cSpd[NK] = { 1.00f, 0.99f, 0.95f, 0.92f, 0.96f, 1.08f };
-static const float cAcc[NK] = { 1.00f, 1.05f, 1.12f, 1.18f, 1.10f, 0.84f };
-static const float cTrn[NK] = { 1.00f, 1.02f, 1.10f, 1.14f, 1.12f, 0.88f };
+static const float cSpd[NK] = { 1.00f, 1.05f, 0.97f, 0.97f, 1.06f, 0.94f };
+static const float cAcc[NK] = { 1.00f, 0.92f, 1.12f, 1.00f, 0.88f, 1.15f };
+static const float cTrn[NK] = { 1.00f, 0.98f, 1.00f, 1.12f, 0.92f, 1.08f };
 
 static int trackSel = 0, charSel = 0;
 static int kChar[NK];            /* kart slotu -> karakter (0 = oyuncu) */
@@ -351,7 +351,7 @@ static void buildTrackPath(void) {
     static float dx[DENSE_MAX], dz[DENSE_MAX], cum[DENSE_MAX + 1];
     if (trackSel == 0) {
         nCtrl = 12; trackSC = 1.3f;
-        for (int i = 0; i < 12; i++) { ctrl[i][0] = ctrl0[i][0]; ctrl[i][1] = ctrl0[i][1]; }
+        for (int i = 0; i < 12; i++) { ctrl[i][0] = ctrl0[i][0]; ctrl[i][1] = ctrl0[i][1]; if (mirrorMode) ctrl[i][0] = -ctrl[i][0]; }
     } else {
         const TrackShape *sh = &shapes[trackSel];
         nCtrl = 24; trackSC = 1.0f;
@@ -360,6 +360,7 @@ static void buildTrackPath(void) {
             float r = 1.0f + sh->e * cosf(sh->k * th + sh->ph);
             ctrl[i][0] = sh->rx * r * cosf(th);
             ctrl[i][1] = sh->rz * r * sinf(th);
+            if(mirrorMode) ctrl[i][0] = -ctrl[i][0];
         }
     }
     const int per = DENSE_MAX / nCtrl;
@@ -407,18 +408,15 @@ static void buildTrackPath(void) {
 }
 
 static int nFlat = 0, nScene = 0;
-static int kartStart[NK], kartCnt[NK];   /* her karakterin vertex sayisi farkli */
+static int kartStart[NK], kartCount = 0;
 static int boxStart, boxCount, coneStart, coneCount, flameStart, flameCount, shadowStart, shadowCount;
 static int sparkStart, sparkCount;
 static int groundEnd, roadStart, roadEnd;
 static int shellGStart, shellGCount, shellRStart, shellRCount, banStart, banCount, ghostStart, ghostCount3;
 static unsigned char padMark[M];
 
-static void buildKartMesh(int ch) {
-    unsigned body = kBody[ch], trim = kTrim[ch];
-    unsigned dark = RGB(30, 30, 34), grey = RGB(150, 150, 158), skin = kSkin[ch], hat = kHat[ch];
-    unsigned white = RGB(250, 250, 250), brown = RGB(80, 45, 20), overall = RGB(40, 70, 200);
-    /* ortak: sasi, tekerlekler, arka kanat, direksiyon */
+static void buildKartMesh(unsigned body, unsigned trim) {
+    unsigned dark = RGB(30, 30, 34), grey = RGB(150, 150, 158), skin = RGB(255, 208, 165);
     box3(0, 0.55f, 0, 1.55f, 0.28f, 0.75f, body);
     box3(1.9f, 0.45f, 0, 0.5f, 0.2f, 0.5f, body);
     box3(2.35f, 0.3f, 0, 0.16f, 0.07f, 1.05f, trim);
@@ -427,86 +425,19 @@ static void buildKartMesh(int ch) {
     box3(-1.6f, 1.0f, -0.55f, 0.06f, 0.32f, 0.06f, dark);
     box3(-1.3f, 0.95f, 0, 0.3f, 0.25f, 0.5f, grey);
     for (int i = 0; i < 2; i++) {
-        float sd = i ? 1.0f : -1.0f;
-        box3(1.25f, 0.42f, sd * 1.0f, 0.42f, 0.42f, 0.22f, dark);
-        box3(1.25f, 0.42f, sd * 1.23f, 0.2f, 0.2f, 0.02f, grey);
-        box3(-1.2f, 0.5f, sd * 1.05f, 0.5f, 0.5f, 0.28f, dark);
-        box3(-1.2f, 0.5f, sd * 1.34f, 0.24f, 0.24f, 0.02f, grey);
+        float s = i ? 1.0f : -1.0f;
+        box3(1.25f, 0.42f, s * 1.0f, 0.42f, 0.42f, 0.22f, dark);
+        box3(1.25f, 0.42f, s * 1.23f, 0.2f, 0.2f, 0.02f, grey);
+        box3(-1.2f, 0.5f, s * 1.05f, 0.5f, 0.5f, 0.28f, dark);
+        box3(-1.2f, 0.5f, s * 1.34f, 0.24f, 0.24f, 0.02f, grey);
     }
+    box3(-0.2f, 1.0f, 0, 0.3f, 0.38f, 0.38f, trim);
+    box3(-0.2f, 1.62f, 0, 0.27f, 0.27f, 0.27f, skin);
+    box3(-0.2f, 1.78f, 0, 0.31f, 0.2f, 0.31f, body);
+    box3(0.1f, 1.62f, 0, 0.04f, 0.1f, 0.22f, dark);
+    box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, skin);
+    box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, skin);
     box3(0.5f, 1.05f, 0, 0.04f, 0.12f, 0.18f, dark);
-
-    /* karaktere ozel surucu */
-    switch (ch) {
-    case 0: case 1:     /* MARIO / LUIGI: sapka, biyik, tulum */
-        box3(-0.2f, 1.0f, 0, 0.3f, 0.38f, 0.38f, hat);
-        box3(-0.2f, 0.82f, 0, 0.31f, 0.18f, 0.39f, overall);
-        box3(-0.2f, 1.62f, 0, 0.27f, 0.27f, 0.27f, skin);
-        box3(-0.2f, 1.78f, 0, 0.31f, 0.2f, 0.31f, hat);
-        box3(0.12f, 1.74f, 0, 0.16f, 0.04f, 0.26f, hat);          /* siper */
-        box3(0.1f, 1.62f, 0, 0.04f, 0.1f, 0.22f, dark);           /* goz */
-        box3(0.12f, 1.52f, 0, 0.05f, 0.04f, 0.17f, brown);        /* biyik */
-        box3(0.14f, 1.58f, 0, 0.06f, 0.06f, 0.06f, skin);         /* burun */
-        box3(-0.2f, 1.82f, 0.28f, 0.03f, 0.05f, 0.05f, white);    /* sapka rozeti */
-        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, white);
-        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, white);
-        break;
-    case 2:             /* PEACH: elbise, sarı sac, tac */
-        box3(-0.2f, 0.95f, 0, 0.34f, 0.3f, 0.44f, body);
-        box3(-0.2f, 1.25f, 0, 0.28f, 0.14f, 0.34f, trim);
-        box3(-0.2f, 1.62f, 0, 0.27f, 0.27f, 0.27f, skin);
-        box3(-0.2f, 1.82f, 0, 0.3f, 0.1f, 0.3f, hat);             /* sac ustu */
-        box3(-0.46f, 1.55f, 0, 0.1f, 0.38f, 0.3f, hat);           /* sac arka */
-        box3(-0.2f, 1.96f, 0, 0.16f, 0.06f, 0.16f, RGB(255, 215, 40));   /* tac */
-        box3(-0.2f, 2.06f, 0, 0.04f, 0.06f, 0.04f, RGB(60, 120, 255));
-        box3(0.1f, 1.62f, 0, 0.04f, 0.1f, 0.22f, dark);
-        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, white);
-        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, white);
-        break;
-    case 3:             /* TOAD: kirmizi benekli buyuk mantar sapka */
-        box3(-0.2f, 1.0f, 0, 0.28f, 0.36f, 0.36f, white);
-        box3(-0.2f, 1.0f, 0, 0.29f, 0.3f, 0.37f, body);           /* yelek */
-        box3(-0.2f, 1.5f, 0, 0.24f, 0.22f, 0.24f, skin);
-        box3(-0.2f, 1.86f, 0, 0.5f, 0.3f, 0.5f, white);           /* mantar */
-        box3(-0.2f, 2.17f, 0, 0.18f, 0.03f, 0.18f, RGB(225, 35, 35));
-        box3(0.31f, 1.92f, 0, 0.03f, 0.12f, 0.12f, RGB(225, 35, 35));
-        box3(-0.2f, 1.92f, 0.51f, 0.12f, 0.12f, 0.03f, RGB(225, 35, 35));
-        box3(-0.2f, 1.92f, -0.51f, 0.12f, 0.12f, 0.03f, RGB(225, 35, 35));
-        box3(0.06f, 1.52f, 0, 0.04f, 0.08f, 0.18f, dark);
-        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, skin);
-        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, skin);
-        break;
-    case 4:             /* YOSHI: yesil govde, beyaz karin, uzun burun, kirmizi eyer */
-        box3(-0.2f, 0.95f, 0, 0.3f, 0.36f, 0.38f, body);
-        box3(0.12f, 0.9f, 0, 0.03f, 0.24f, 0.24f, white);         /* karin */
-        box3(-0.55f, 1.18f, 0, 0.14f, 0.08f, 0.36f, RGB(225, 35, 35));   /* eyer */
-        box3(0.0f, 1.62f, 0, 0.34f, 0.3f, 0.32f, skin);           /* bas */
-        box3(0.42f, 1.52f, 0, 0.22f, 0.16f, 0.26f, skin);         /* burun */
-        box3(0.64f, 1.58f, 0.0f, 0.03f, 0.04f, 0.08f, dark);
-        for (int i = 0; i < 2; i++) {
-            float sd = i ? 1.0f : -1.0f;
-            box3(0.14f, 1.95f, sd * 0.13f, 0.08f, 0.15f, 0.08f, white);   /* goz */
-            box3(0.2f, 1.98f, sd * 0.13f, 0.03f, 0.07f, 0.04f, dark);
-        }
-        box3(-0.3f, 1.8f, 0, 0.1f, 0.12f, 0.14f, RGB(225, 35, 35));    /* sirt dikeni */
-        box3(0.15f, 1.0f, 0.42f, 0.25f, 0.07f, 0.07f, skin);
-        box3(0.15f, 1.0f, -0.42f, 0.25f, 0.07f, 0.07f, skin);
-        break;
-    default:            /* BOWSER: buyuk govde, yesil sivri kabuk, boynuz */
-        box3(-0.25f, 1.05f, 0, 0.4f, 0.44f, 0.5f, body);
-        box3(-0.7f, 1.2f, 0, 0.16f, 0.42f, 0.54f, trim);          /* kabuk */
-        cone3(-0.72f, 1.6f, 0.34f, 0.12f, 0.36f, 4, 0.0f, white);
-        cone3(-0.72f, 1.6f, -0.34f, 0.12f, 0.36f, 4, 0.0f, white);
-        cone3(-0.72f, 1.62f, 0.0f, 0.12f, 0.4f, 4, 0.0f, white);
-        box3(0.0f, 1.72f, 0, 0.32f, 0.28f, 0.34f, skin);          /* bas */
-        box3(0.35f, 1.62f, 0, 0.14f, 0.13f, 0.22f, skin);         /* burun */
-        box3(-0.2f, 1.98f, 0, 0.3f, 0.1f, 0.3f, hat);             /* sac */
-        cone3(-0.05f, 2.0f, 0.24f, 0.07f, 0.3f, 4, 0.0f, white);  /* boynuz */
-        cone3(-0.05f, 2.0f, -0.24f, 0.07f, 0.3f, 4, 0.0f, white);
-        box3(0.12f, 1.74f, 0, 0.04f, 0.09f, 0.26f, dark);
-        box3(0.15f, 1.05f, 0.5f, 0.25f, 0.09f, 0.09f, skin);
-        box3(0.15f, 1.05f, -0.5f, 0.25f, 0.09f, 0.09f, skin);
-        break;
-    }
 }
 
 static void buildSparkMesh(void) {
@@ -694,15 +625,16 @@ static void buildMesh(void) {
     nScene = nv;
 
     /* --- arac meshleri --- */
+    kartCount = 0;
     for (int i = 0; i < NK; i++) {
         kartStart[i] = nv;
-        buildKartMesh(kChar[i]);
-        kartCnt[i] = nv - kartStart[i];
+        buildKartMesh(kBody[kChar[i]], kTrim[kChar[i]]);
+        kartCount = nv - kartStart[i];
     }
     /* ghost araci: yari saydam */
     pvAlpha = 140;
     ghostStart = nv;
-    buildKartMesh(ghostBestChar);
+    buildKartMesh(kBody[ghostBestChar], kTrim[ghostBestChar]);
     ghostCount3 = nv - ghostStart;
     pvAlpha = 255;
     boxStart = nv;
@@ -829,16 +761,60 @@ static float cd, raceTime, finalTime, shake, lapFlash, tAnim, camH, fovCur;
 static unsigned prevB = 0;
 
 /* ---------- Oyun modu ---------- */
-#define GAME_RACE       0
-#define GAME_TIME_TRIAL 1
+#define GAME_RACE          0
+#define GAME_TIME_TRIAL    1
+#define GAME_CHAMPIONSHIP  2
+#define GAME_CAREER        3
+
+#define STATE_DIFF         (-4)
+#define STATE_CUPSELECT    (-5)
+#define STATE_STATS        (-6)
+#define STATE_CUPRESULT    4
+
+#define NCUPS              3
+#define CHAMP_RACES        4
+
 static int gameMode = GAME_RACE;
 static int menuSel = 0;
-static int activeKarts(void) { return gameMode == GAME_RACE ? NK : 1; }
+static int diffSel = 2;         /* 50, 100, 150, Mirror */
+static int mirrorMode = 0;
+static int cupSel = 0;
+static int champRace = 0;
+static int champPoints[NK];
+static int champOverallRank = 0;
+static int champMedal = 0;
+static int careerLevel = 0;
+static int careerActive = 0;
+static int skyPhase = 0;         /* 0 day, 1 sunset, 2 night */
+static float skyScroll = 0.0f;
+
+static const char *diffNames[4] = { "50CC", "100CC", "150CC", "MIRROR" };
+static const float diffBotMul[4] = { 0.78f, 0.93f, 1.08f, 1.08f };
+static const char *cupNames[NCUPS] = { "GREEN CUP", "SUNSET CUP", "STAR CUP" };
+static const int cupTracks[NCUPS][CHAMP_RACES] = {
+    {0, 1, 2, 3},
+    {1, 3, 0, 2},
+    {2, 0, 3, 1}
+};
+
+static int activeKarts(void) { return gameMode == GAME_TIME_TRIAL ? 1 : NK; }
+static int isChampMode(void) { return gameMode == GAME_CHAMPIONSHIP || gameMode == GAME_CAREER; }
 
 /* ---------- Ses: motor + muzik (sentezlenir, dosya gerekmez) ---------- */
 #define AUDIO_BLOCK 512
 static volatile float aSpd = 0.0f;
 static volatile int aEngineOn = 0, aMusicOn = 1, aBoost = 0, aTrackId = 0;
+static volatile int aMusicScene = 1; /* 0 menu, 1 race, 2 finish */
+static volatile unsigned aSfxSeq = 0;
+static volatile int aSfx = 0;
+#define SFX_NONE 0
+#define SFX_ITEM 1
+#define SFX_SHELL 2
+#define SFX_BOOST 3
+#define SFX_COLLISION 4
+#define SFX_DRIFT 5
+#define SFX_FINISH 6
+static void triggerSfx(int s) { aSfx=s; aSfxSeq++; }
 
 #define REST 99
 static const signed char leadPat[NTRACKS][16] = {
@@ -856,8 +832,8 @@ static int audioThread(SceSize args, void *argp) {
     int ch = sceAudioChReserve(PSP_AUDIO_NEXT_CHANNEL, AUDIO_BLOCK, PSP_AUDIO_FORMAT_STEREO);
     if (ch < 0) return 0;
     static short buf[AUDIO_BLOCK * 2];
-    float leadPh = 0, bassPh = 0, engPh = 0, eng2Ph = 0, leadF = 0, bassF = 0, stepT = 0, env = 0, engVol = 0;
-    int step = 0;
+    float leadPh = 0, bassPh = 0, engPh = 0, eng2Ph = 0, sfxPh = 0, leadF = 0, bassF = 0, stepT = 0, env = 0, engVol = 0;
+    int step = 0, lastSfxSeq = 0, sfxType = 0; float sfxTime = 0;
     unsigned noise = 1;
     const float inv = 1.0f / 44100.0f;
     while (1) {
@@ -866,6 +842,8 @@ static int audioThread(SceSize args, void *argp) {
         float ef = 48.0f + aSpd * 3.6f + (aBoost ? 30.0f : 0.0f);
         float engTarget = aEngineOn ? 1.0f : 0.0f;
         int musicOn = aMusicOn;
+        int scene = aMusicScene;
+        if (aSfxSeq != (unsigned)lastSfxSeq) { lastSfxSeq=(int)aSfxSeq; sfxType=aSfx; sfxTime=0; }
         for (int i = 0; i < AUDIO_BLOCK; i++) {
             stepT += stepRate[tr] * inv;
             if (stepT >= 1.0f) {
@@ -881,7 +859,9 @@ static int audioThread(SceSize args, void *argp) {
             bassPh += bassF * inv; if (bassPh >= 1.0f) bassPh -= 1.0f;
             float lead = (leadF > 0.0f) ? (leadPh < 0.25f ? 0.5f : -0.5f) * env : 0.0f;
             float bass = (bassPh < 0.5f ? 4.0f * bassPh - 1.0f : 3.0f - 4.0f * bassPh) * 0.5f;
-            float music = musicOn ? (lead * 0.30f + bass * 0.32f) : 0.0f;
+            float music = musicOn ? (lead * (scene==0?0.24f:0.30f) + bass * (scene==2?0.20f:0.32f)) : 0.0f;
+            if(scene==0) music += 0.10f * sinf(leadPh*2.0f*PI);
+            if(scene==2) music += 0.12f * sinf(leadPh*2.0f*PI*0.5f);
 
             engPh += ef * inv; if (engPh >= 1.0f) engPh -= 1.0f;
             eng2Ph += ef * 2.01f * inv; if (eng2Ph >= 1.0f) eng2Ph -= 1.0f;
@@ -890,7 +870,24 @@ static int audioThread(SceSize args, void *argp) {
             engVol += (engTarget - engVol) * 0.0005f;
             float eng = ((2.0f * engPh - 1.0f) * 0.5f + (eng2Ph < 0.5f ? 0.25f : -0.25f) + nz * 0.08f) * 0.30f * engVol;
 
-            float o = music + eng;
+            float sfx = 0.0f;
+            if(sfxType != SFX_NONE) {
+                float dur=(sfxType==SFX_FINISH?0.9f:(sfxType==SFX_BOOST?0.28f:0.20f));
+                if(sfxTime<dur) {
+                    float f=180.0f;
+                    if(sfxType==SFX_ITEM) f=880.0f + 180.0f*sinf(sfxTime*28.0f);
+                    else if(sfxType==SFX_SHELL) f=220.0f+260.0f*sinf(sfxTime*16.0f);
+                    else if(sfxType==SFX_BOOST) f=120.0f+700.0f*(1.0f-sfxTime/dur);
+                    else if(sfxType==SFX_COLLISION) f=85.0f;
+                    else if(sfxType==SFX_DRIFT) f=360.0f+90.0f*sinf(sfxTime*30.0f);
+                    else if(sfxType==SFX_FINISH) f=520.0f+220.0f*sinf(sfxTime*7.0f);
+                    sfxPh += f*inv; if(sfxPh>=1.0f) sfxPh-=1.0f;
+                    float pulse = 1.0f - sfxTime/dur;
+                    sfx = (sinf(sfxPh*2.0f*PI)*0.42f + nz*0.08f) * pulse;
+                } else sfxType=SFX_NONE;
+                sfxTime += inv;
+            }
+            float o = music + eng + sfx;
             if (o > 1.0f) o = 1.0f;
             if (o < -1.0f) o = -1.0f;
             short sm = (short)(o * 14000.0f);
@@ -943,21 +940,129 @@ static void makeTextures(void) {
     sceKernelDcacheWritebackAll();
 }
 
+
+/* ---------- Gercek PNG texture sistemi + cache + atlas ---------- */
+typedef struct {
+    char path[96];
+    unsigned char *data;
+    int w, h;
+    unsigned stamp;
+    int ready;
+} PspTexture;
+#define TEX_CACHE_MAX 16
+static PspTexture texCache[TEX_CACHE_MAX];
+static unsigned texStamp = 1;
+static PspTexture *texGrassFile = NULL, *texRoadFile = NULL;
+static PspTexture *texSkyDay = NULL, *texSkySunset = NULL, *texSkyNight = NULL;
+static PspTexture *texCloud = NULL, *texAtlas = NULL, *texMountain = NULL;
+
+typedef struct { int x, y, w, h; } AtlasUV;
+static const AtlasUV atlasUV[8] = {
+    {0,0,64,64},{64,0,64,64},{128,0,64,64},{192,0,64,64},
+    {0,64,64,64},{64,64,64,64},{128,64,64,64},{192,64,64,64}
+};
+
+static int texPow2(int n) { int p=1; while(p<n && p<1024) p<<=1; return p; }
+static PspTexture *texFind(const char *path) {
+    for (int i=0;i<TEX_CACHE_MAX;i++) if (texCache[i].ready && strcmp(texCache[i].path,path)==0) { texCache[i].stamp=++texStamp; return &texCache[i]; }
+    return NULL;
+}
+static PspTexture *loadPngTexture(const char *path) {
+    PspTexture *hit=texFind(path); if(hit) return hit;
+    int slot=-1; unsigned oldest=0xFFFFFFFFu;
+    for(int i=0;i<TEX_CACHE_MAX;i++) {
+        if(!texCache[i].ready) { slot=i; break; }
+        if(texCache[i].stamp<oldest){ oldest=texCache[i].stamp; slot=i; }
+    }
+    if(slot<0) return NULL;
+    if(texCache[slot].data){ free(texCache[slot].data); texCache[slot].data=NULL; }
+    int w=0,h=0,nc=0;
+    unsigned char *raw=stbi_load(path,&w,&h,&nc,4);
+    if(!raw) { texCache[slot].ready=0; return NULL; }
+    int tw=texPow2(w), th=texPow2(h);
+    if(tw>512 || th>512) { stbi_image_free(raw); texCache[slot].ready=0; return NULL; }
+    unsigned char *dst=(unsigned char*)memalign(16,(size_t)tw*(size_t)th*4u);
+    if(!dst){ stbi_image_free(raw); texCache[slot].ready=0; return NULL; }
+    memset(dst,0,(size_t)tw*(size_t)th*4u);
+    for(int y=0;y<h;y++) memcpy(dst+(size_t)y*tw*4u,raw+(size_t)y*w*4u,(size_t)w*4u);
+    stbi_image_free(raw);
+    memset(texCache[slot].path,0,sizeof(texCache[slot].path)); strncpy(texCache[slot].path,path,sizeof(texCache[slot].path)-1);
+    texCache[slot].data=dst; texCache[slot].w=tw; texCache[slot].h=th; texCache[slot].stamp=++texStamp; texCache[slot].ready=1;
+    sceKernelDcacheWritebackInvalidateAll();
+    return &texCache[slot];
+}
+static void loadTextureBank(void) {
+    texGrassFile=loadPngTexture("assets/textures/grass.png");
+    texRoadFile=loadPngTexture("assets/textures/road.png");
+    texSkyDay=loadPngTexture("assets/textures/sky_day.png");
+    texSkySunset=loadPngTexture("assets/textures/sky_sunset.png");
+    texSkyNight=loadPngTexture("assets/textures/sky_night.png");
+    texCloud=loadPngTexture("assets/textures/cloud.png");
+    texAtlas=loadPngTexture("assets/textures/atlas.png");
+    texMountain=loadPngTexture("assets/textures/mountain.png");
+    (void)loadPngTexture("assets/textures/kart_red.png");
+    (void)loadPngTexture("assets/textures/kart_blue.png");
+    (void)loadPngTexture("assets/textures/kart_green.png");
+    (void)loadPngTexture("assets/textures/kart_yellow.png");
+    (void)loadPngTexture("assets/textures/item_box.png");
+    (void)loadPngTexture("assets/textures/spark.png");
+}
+static void bindTexture(const PspTexture *t, const void *fallback) {
+    sceGuTexMode(GU_PSM_8888,0,0,0); sceGuTexFunc(GU_TFX_MODULATE,GU_TCC_RGB); sceGuTexFilter(GU_LINEAR,GU_LINEAR); sceGuTexWrap(GU_REPEAT,GU_REPEAT);
+    if(t && t->ready) sceGuTexImage(0,t->w,t->h,t->w,t->data);
+    else sceGuTexImage(0,64,64,64,fallback);
+    sceGuTexFlush();
+}
+
+typedef struct { float u,v; unsigned c; float x,y,z; } V2T;
+#define VF2T (GU_COLOR_8888 | GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D)
+static void drawTexRect(const PspTexture *t,float x,float y,float w,float h,float u0,float v0,float u1,float v1,unsigned c) {
+    if(!t || !t->ready) return;
+    V2T *v=(V2T*)sceGuGetMemory(2*sizeof(V2T));
+    v[0].u=u0; v[0].v=v0; v[0].c=c; v[0].x=x; v[0].y=y; v[0].z=0;
+    v[1].u=u1; v[1].v=v1; v[1].c=c; v[1].x=x+w; v[1].y=y+h; v[1].z=0;
+    sceGuTexMode(GU_PSM_8888,0,0,0); sceGuTexFunc(GU_TFX_MODULATE,GU_TCC_RGBA); sceGuTexFilter(GU_LINEAR,GU_LINEAR); sceGuTexWrap(GU_CLAMP,GU_CLAMP); sceGuTexImage(0,t->w,t->h,t->w,t->data); sceGuTexFlush();
+    sceGuEnable(GU_TEXTURE_2D); sceGuDrawArray(GU_SPRITES,VF2T,2,0,v); sceGuDisable(GU_TEXTURE_2D);
+}
+static void drawAtlasIcon(int cell,float x,float y,float size,unsigned c) {
+    if(!texAtlas || !texAtlas->ready || cell<0 || cell>=8) return;
+    AtlasUV a=atlasUV[cell]; drawTexRect(texAtlas,x,y,size,size,(float)a.x,(float)a.y,(float)(a.x+a.w),(float)(a.y+a.h),c);
+}
+
 /* ---------- Kayit sistemi (v2) ---------- */
 #define SAVE_DIR   "ms0:/PSP/SAVEDATA/MKPSP"
-#define SAVE_FILE  "ms0:/PSP/SAVEDATA/MKPSP/save2.dat"
-#define SAVE_MAGIC 0x32504B4Du   /* 'MKP2' */
+#define SAVE_FILE  "ms0:/PSP/SAVEDATA/MKPSP/save3.dat"
+#define SAVE_MAGIC 0x33504B4Du   /* 'MKP3' */
 
 typedef struct {
     unsigned magic;
-    float bestLap[NTRACKS];     /* pist basina en iyi tur */
-    float bestRace[NTRACKS];    /* pist basina en iyi yaris */
-    float bestTT[NTRACKS];      /* pist basina time trial rekoru */
+    float bestLap[NTRACKS];
+    float bestRace[NTRACKS];
+    float bestTT[NTRACKS];
     int totalWins;
     int lastChar, lastTrack;
+    unsigned unlockedChars;
+    unsigned unlockedTracks;
+    unsigned unlockedCups;
+    int careerLevel;
+    int cupsGold, cupsSilver, cupsBronze;
+    int totalRaces, totalItems, totalHits, totalBoosts;
 } SaveData;
 
 static SaveData saveData;
+
+static void saveDefaults(void) {
+    memset(&saveData, 0, sizeof(saveData));
+    saveData.magic = SAVE_MAGIC;
+    saveData.unlockedChars = 0x00000007u; /* ilk 3 karakter */
+    saveData.unlockedTracks = 0x00000003u; /* ilk 2 pist */
+    saveData.unlockedCups = 0x00000001u; /* ilk kupa */
+    saveData.careerLevel = 0;
+}
+static int charUnlocked(int id) { return id >= 0 && id < NK && (saveData.unlockedChars & (1u << id)); }
+static int trackUnlocked(int id) { return id >= 0 && id < NTRACKS && (saveData.unlockedTracks & (1u << id)); }
+static int cupUnlocked(int id) { return id >= 0 && id < NCUPS && (saveData.unlockedCups & (1u << id)); }
+static int countUnlocked(unsigned bits, int maxn) { int n=0; for(int i=0;i<maxn;i++) if(bits&(1u<<i)) n++; return n; }
 
 /* ---------- Ghost (pist basina ayri dosya, 30 Hz kayit, en fazla 300 sn, checksum) ---------- */
 #define GHOST_MAX   9000
@@ -1031,8 +1136,12 @@ static void loadSave(void) {
         sceIoRead(fd, &saveData, sizeof(saveData));
         sceIoClose(fd);
     }
-    if (saveData.magic != SAVE_MAGIC) memset(&saveData, 0, sizeof(saveData));
+    if (saveData.magic != SAVE_MAGIC) saveDefaults();
     saveData.magic = SAVE_MAGIC;
+    if (saveData.unlockedChars == 0) saveData.unlockedChars = 0x00000007u;
+    if (saveData.unlockedTracks == 0) saveData.unlockedTracks = 0x00000003u;
+    if (saveData.unlockedCups == 0) saveData.unlockedCups = 0x00000001u;
+    if (saveData.careerLevel < 0) saveData.careerLevel = 0;
     for (int i = 0; i < NTRACKS; i++) {
         if (!(saveData.bestLap[i] >= 0)) saveData.bestLap[i] = 0;    /* bozuk veri korumasi */
         if (!(saveData.bestRace[i] >= 0)) saveData.bestRace[i] = 0;
@@ -1056,10 +1165,8 @@ static void finishRace(float raceT, int rank) {
     checkBestLap();
     newRecord = 0;
     int t = trackSel;
-    if (gameMode == GAME_RACE) {
-        if (rank == 1) saveData.totalWins++;
-        if (saveData.bestRace[t] == 0 || raceT < saveData.bestRace[t]) saveData.bestRace[t] = raceT;
-    } else {
+    saveData.totalRaces++;
+    if (gameMode == GAME_TIME_TRIAL) {
         if (saveData.bestTT[t] == 0 || raceT < saveData.bestTT[t]) {
             saveData.bestTT[t] = raceT;
             newRecord = 1;
@@ -1071,7 +1178,62 @@ static void finishRace(float raceT, int rank) {
                 saveGhost(t, raceT, charSel);
             }
         }
+    } else {
+        if (saveData.bestRace[t] == 0 || raceT < saveData.bestRace[t]) saveData.bestRace[t] = raceT;
+        if (gameMode == GAME_RACE && rank == 1) saveData.totalWins++;
     }
+    saveData.lastChar = charSel; saveData.lastTrack = trackSel;
+    saveGame();
+}
+
+static int racePointsForRank(int r) {
+    static const int pts[NK] = {10, 8, 6, 4, 2, 1};
+    if (r < 1) r = 1;
+    if (r > NK) r = NK;
+    return pts[r - 1];
+}
+
+static int rankForKart(int who) {
+    int r = 1;
+    for (int i = 0; i < NK; i++) if (i != who && K[i].prog > K[who].prog) r++;
+    return r;
+}
+
+static int calcChampOverallRank(int who) {
+    int r = 1;
+    for (int i = 0; i < NK; i++) if (i != who && champPoints[i] > champPoints[who]) r++;
+    return r;
+}
+
+static void applyChampionshipRacePoints(void) {
+    for (int i = 0; i < NK; i++) champPoints[i] += racePointsForRank(rankForKart(i));
+    champOverallRank = calcChampOverallRank(0);
+}
+
+static void awardChampionship(void) {
+    champOverallRank = calcChampOverallRank(0);
+    champMedal = (champOverallRank == 1) ? 3 : ((champOverallRank <= 3) ? 2 : 1);
+    if (champMedal == 3) saveData.cupsGold++;
+    else if (champMedal == 2) saveData.cupsSilver++;
+    else saveData.cupsBronze++;
+    if (gameMode == GAME_CAREER) {
+        careerActive = 1;
+        if (champOverallRank <= 3) careerLevel++;
+        saveData.careerLevel = careerLevel;
+        /* Bronze: yeni pist; Silver: pist + karakter; Gold: pist + karakter + kupa */
+        int nextTrack = 0;
+        while (nextTrack < NTRACKS && trackUnlocked(nextTrack)) nextTrack++;
+        if (champMedal >= 1 && nextTrack < NTRACKS) saveData.unlockedTracks |= (1u << nextTrack);
+        int nextChar = 0;
+        while (nextChar < NK && charUnlocked(nextChar)) nextChar++;
+        if (champMedal >= 2 && nextChar < NK) saveData.unlockedChars |= (1u << nextChar);
+        if (champMedal == 3) {
+            int nextCup = 0;
+            while (nextCup < NCUPS && cupUnlocked(nextCup)) nextCup++;
+            if (nextCup < NCUPS) saveData.unlockedCups |= (1u << nextCup);
+        }
+    }
+    if (champOverallRank == 1) saveData.totalWins++;
     saveData.lastChar = charSel; saveData.lastTrack = trackSel;
     saveGame();
 }
@@ -1227,6 +1389,7 @@ static void fireGreenShell(int owner, float x, float z, float ang) {
             sh->vz = sinf(ang) * 80.0f;
             sh->speed = 80.0f;
             sh->life = 8.0f;
+            triggerSfx(SFX_SHELL);
             break;
         }
     }
@@ -1246,6 +1409,7 @@ static void fireRedShell(int owner, int target) {
             sh->vx = sh->vz = 0;
             sh->speed = 72.0f;
             sh->life = 10.0f;
+            triggerSfx(SFX_SHELL);
             break;
         }
     }
@@ -1304,6 +1468,7 @@ static void hitKart(Kart *k, float slow, float spin) {
         return;
     }
     spawnKartFx(who, 2, 10);
+    saveData.totalHits++; triggerSfx(SFX_COLLISION);
     k->spd *= slow;
     k->boostT = 0;
     k->spinT = spin;
@@ -1335,8 +1500,9 @@ static void useItem(void) {
     itemCntG = 0;
     p->item = ITEM_NONE;
 
+    saveData.totalItems++; triggerSfx(SFX_ITEM);
     if (item == ITEM_MUSH) {
-        p->boostT = 2.0f;
+        p->boostT = 2.0f; saveData.totalBoosts++; triggerSfx(SFX_BOOST);
         p->spd += VMAX * 0.18f;
     } else if (item == ITEM_GREENSHELL) {
         fireGreenShell(0, p->x + cosf(p->h) * 2.5f, p->z + sinf(p->h) * 2.5f, p->h);
@@ -1359,7 +1525,7 @@ static void useItem(void) {
     } else if (item == ITEM_SHIELD) {
         p->shield = 1;
     } else if (item == ITEM_STAR) {
-        p->starT = 5.0f;
+        p->starT = 5.0f; saveData.totalBoosts++; triggerSfx(SFX_BOOST);
         p->boostT = 5.0f;
         p->spd += VMAX * 0.22f;
     }
@@ -1481,8 +1647,8 @@ static void stepKart(Kart *k, float steer, int gas, int brake, int driftBtn) {
     if (driftBtn && !k->driftDir && k->spd > VMAX * 0.45f && fabsf(steer) > 0.3f) { k->driftDir = steer > 0 ? 1 : -1; k->driftT = 0; }
     if (k->driftDir) {
         if (!driftBtn || k->spd < VMAX * 0.3f) {
-            if (k->driftT > 1.8f) k->boostT = 1.5f;
-            else if (k->driftT > 0.8f) k->boostT = 0.9f;
+            if (k->driftT > 1.8f) { k->boostT = 1.5f; saveData.totalBoosts++; triggerSfx(SFX_BOOST); }
+            else if (k->driftT > 0.8f) { k->boostT = 0.9f; saveData.totalBoosts++; triggerSfx(SFX_DRIFT); }
             k->driftDir = 0; k->driftT = 0;
         } else k->driftT += DT;
     }
@@ -1517,37 +1683,63 @@ static void stepKart(Kart *k, float steer, int gas, int brake, int driftBtn) {
     }
 }
 
+static int botThreatened(int who) {
+    for(int i=0;i<NK;i++) if(i!=who && shellShots[i].active && shellShots[i].target==who) return 1;
+    for(int i=0;i<nthings;i++) if(things[i].active && things[i].type==TH_BANANA) {
+        float dx=things[i].x-K[who].x, dz=things[i].z-K[who].z;
+        if(dx*dx+dz*dz < 42.0f) return 1;
+    }
+    return 0;
+}
+static int botTargetLeader(int who) {
+    int best=-1; float bp=-1e30f;
+    for(int i=0;i<NK;i++) if(i!=who && K[i].prog>bp){ bp=K[i].prog; best=i; }
+    return best;
+}
+
 static void aiDrive(Kart *k, int n) {
     int la = (k->idx + 6 + (int)(k->spd / 8.0f)) % M;
-    float lane = (k->lane + 0.35f * sinf(k->prog * 0.01f + n)) * HW * 0.6f;
-    float tx = tcx[la] - tfz[la] * lane, tz = tcz[la] + tfx[la] * lane;
-    float want = atan2f(tz - k->z, tx - k->x);
-    float steer = clampf(wrapA(want - k->h) * 2.2f, -1, 1);
-    int j = (k->idx + 14) % M;
-    float turn = fabsf(wrapA(tth[j] - tth[k->idx]));
-    float target = VMAX * k->skill * (1.0f - clampf(turn * 0.8f, 0, 0.35f));
-    float pd = k->prog - K[0].prog;
-    if (n != 0) { if (pd > 250) target *= 0.93f; else if (pd < -250) target *= 1.07f; }
-
-    /* Botlar da esya kutularini toplar. */
-    for (int i = 0; i < nthings; i++) {
-        Thing *t = &things[i];
-        if (!t->active || t->type != TH_ITEM || k->item != ITEM_NONE) continue;
-        float dx = t->x - k->x, dz = t->z - k->z;
-        if (dx * dx + dz * dz < 2.3f * 2.3f) {
-            t->active = 0; t->resp = 8.0f;
-            botGiveItem(n);
-            break;
-        }
+    float lane = (k->lane + 0.30f * sinf(k->prog * 0.012f + n)) * HW * 0.62f;
+    /* obstacle dodge: banana/cone ahead */
+    for(int i=0;i<nthings;i++) if(things[i].active && things[i].type==TH_BANANA) {
+        float ddx=things[i].x-k->x, ddz=things[i].z-k->z;
+        float along=ddx*tfx[k->idx]+ddz*tfz[k->idx];
+        float side=ddx*(-tfz[k->idx])+ddz*tfx[k->idx];
+        if(along>0 && along<26.0f && fabsf(side)<3.0f) lane += (side>=0?-1.0f:1.0f)*HW*0.34f;
     }
-
-    /* Zorluk ve pozisyona gore akilli esya kullanimi. */
-    if (k->item != ITEM_NONE && (rnd() < 0.10f || k->item == ITEM_LIGHT || k->item == ITEM_GREENSHELL || k->item == ITEM_REDSHELL))
-        botUseItem(n);
-
-    /* Daha iyi botlar virajlarda hafif fren ve ara sira drift yapar. */
-    int drift = (fabsf(turn) > 0.32f && k->spd > VMAX * 0.55f && ((int)(tAnim * 10.0f) + n) % 3 == 0);
-    stepKart(k, steer, k->spd < target, k->spd > target + 6.0f, drift);
+    float tx = tcx[la] - tfz[la] * lane, tz = tcz[la] + tfx[la] * lane;
+    float want = atan2f(tz-k->z,tx-k->x);
+    float steer = clampf(wrapA(want-k->h)*2.6f,-1,1);
+    int j=(k->idx+14)%M;
+    float turn=fabsf(wrapA(tth[j]-tth[k->idx]));
+    float target=VMAX*k->skill*(1.0f-clampf(turn*0.9f,0,0.40f));
+    float pd=k->prog-K[0].prog;
+    if(pd>300) target*=0.92f;
+    else if(pd<-300) target*=1.10f;
+    /* defense: use shield/star when a shell is targeting us */
+    if(k->item!=ITEM_NONE && botThreatened(n)) {
+        if(k->item==ITEM_SHIELD || k->item==ITEM_STAR) botUseItem(n);
+    }
+    /* item boxes */
+    for(int i=0;i<nthings;i++) {
+        Thing*t=&things[i]; if(!t->active||t->type!=TH_ITEM||k->item!=ITEM_NONE) continue;
+        float dx=t->x-k->x,dz=t->z-k->z;
+        if(dx*dx+dz*dz<5.5f*5.5f){ t->active=0; t->resp=8.0f; botGiveItem(n); break; }
+    }
+    /* attack analysis */
+    if(k->item!=ITEM_NONE) {
+        int leader=botTargetLeader(n);
+        int ahead=botTargetAhead(n);
+        if(k->item==ITEM_REDSHELL && leader>=0 && leader!=n) {
+            k->item=ITEM_REDSHELL; fireRedShell(n,leader); k->item=ITEM_NONE;
+        } else if(k->item==ITEM_GREENSHELL && ahead>=0 && fabsf(K[ahead].prog-k->prog)<360) {
+            fireGreenShell(n,k->x+cosf(k->h)*2.5f,k->z+sinf(k->h)*2.5f,k->h); k->item=ITEM_NONE;
+        } else if(k->item==ITEM_LIGHT && (pd<-120 || leader>=0)) botUseItem(n);
+        else if(k->item==ITEM_BANANA && botTargetBehind(n)>=0 && K[n].prog-K[botTargetBehind(n)].prog<110) botUseItem(n);
+        else if((rnd()<0.09f) || k->item==ITEM_STAR || k->item==ITEM_SHIELD) botUseItem(n);
+    }
+    int drift=(fabsf(turn)>0.28f && k->spd>VMAX*0.52f && ((int)(tAnim*12.0f)+n)%3==0);
+    stepKart(k,steer,k->spd<target,k->spd>target+5.5f,drift);
 }
 
 static int calcRank(void) {
@@ -1571,7 +1763,9 @@ static void initRace(void) {
         memset(k, 0, sizeof(Kart));
         k->x = tcx[ii] - tfz[ii] * lat; k->z = tcz[ii] + tfx[ii] * lat;
         k->h = tth[ii]; k->vh = k->h; k->idx = ii; k->lapc = -1;
-        k->skill = skills[i]; k->lane = -0.8f + (i - 1) * 0.4f;
+        k->skill = skills[i] * diffBotMul[diffSel];
+        if(k->skill>1.15f) k->skill=1.15f;
+        k->lane = -0.8f + (i - 1) * 0.4f;
         trackUpdate(k);
     }
     /* Time trial: botlar hareketsiz ve gizli */
@@ -1619,37 +1813,84 @@ static float readSteer(const SceCtrlData *pad) {
     return clampf(steer, -1.0f, 1.0f);
 }
 
-static void update(SceCtrlData *pad) {
-    tAnim += DT;
-    updateFx();
+static int nextUnlockedChar(int cur, int dir) {
+    for(int n=0;n<NK;n++){ cur=(cur+dir+NK)%NK; if(charUnlocked(cur)) return cur; }
+    return charSel;
+}
+static int nextUnlockedTrack(int cur, int dir) {
+    for(int n=0;n<NTRACKS;n++){ cur=(cur+dir+NTRACKS)%NTRACKS; if(!careerActive || trackUnlocked(cur)) return cur; }
+    return trackSel;
+}
 
+static void resetChampionship(void) {
+    memset(champPoints,0,sizeof(champPoints)); champRace=0; champOverallRank=0; champMedal=0;
+    careerActive = (gameMode==GAME_CAREER);
+    careerLevel = saveData.careerLevel;
+}
+
+static void update(SceCtrlData *pad) {
+    tAnim += DT; skyScroll += DT; updateFx();
     unsigned pressed = pad->Buttons & ~prevB;
 
     if (state == STATE_MENU) {
-        prevB = pad->Buttons;
-        if (pressed & PSP_CTRL_UP) menuSel = GAME_RACE;
-        if (pressed & PSP_CTRL_DOWN) menuSel = GAME_TIME_TRIAL;
-        if (pressed & PSP_CTRL_CROSS) { gameMode = menuSel; state = STATE_CHAR; }
+        prevB=pad->Buttons;
+        if (pressed & PSP_CTRL_UP) menuSel=(menuSel+4)%5;
+        if (pressed & PSP_CTRL_DOWN) menuSel=(menuSel+1)%5;
+        if (pressed & PSP_CTRL_CROSS) {
+            if(menuSel==4) state=STATE_STATS;
+            else { gameMode=menuSel; state=STATE_DIFF; }
+        }
+        if (pressed & PSP_CTRL_TRIANGLE) { skyPhase=(skyPhase+1)%3; }
+        return;
+    }
+    if (state == STATE_STATS) {
+        prevB=pad->Buttons;
+        if (pressed & (PSP_CTRL_CIRCLE|PSP_CTRL_START)) state=STATE_MENU;
+        return;
+    }
+    if (state == STATE_DIFF) {
+        prevB=pad->Buttons;
+        if(pressed & PSP_CTRL_LEFT) diffSel=(diffSel+3)%4;
+        if(pressed & PSP_CTRL_RIGHT) diffSel=(diffSel+1)%4;
+        if(pressed & PSP_CTRL_TRIANGLE) skyPhase=(skyPhase+1)%3;
+        if(pressed & PSP_CTRL_CIRCLE) state=STATE_MENU;
+        if(pressed & PSP_CTRL_CROSS) {
+            mirrorMode=(diffSel==3); if(gameMode==GAME_CHAMPIONSHIP||gameMode==GAME_CAREER) { resetChampionship(); state=STATE_CUPSELECT; }
+            else state=STATE_CHAR;
+        }
+        return;
+    }
+    if (state == STATE_CUPSELECT) {
+        prevB=pad->Buttons;
+        int old=cupSel;
+        if(pressed & PSP_CTRL_LEFT){ do{ cupSel=(cupSel+NCUPS-1)%NCUPS; }while(gameMode==GAME_CAREER && !cupUnlocked(cupSel) && cupSel!=old); }
+        if(pressed & PSP_CTRL_RIGHT){ do{ cupSel=(cupSel+1)%NCUPS; }while(gameMode==GAME_CAREER && !cupUnlocked(cupSel) && cupSel!=old); }
+        if(pressed & PSP_CTRL_CIRCLE) state=STATE_DIFF;
+        if(pressed & PSP_CTRL_CROSS) { state=STATE_CHAR; resetChampionship(); }
         return;
     }
     if (state == STATE_CHAR) {
-        prevB = pad->Buttons;
-        int old = charSel;
-        if (pressed & PSP_CTRL_LEFT) charSel = (charSel + NK - 1) % NK;
-        if (pressed & PSP_CTRL_RIGHT) charSel = (charSel + 1) % NK;
-        if (charSel != old) { rebuildAll(); state = STATE_CHAR; }
-        if (pressed & PSP_CTRL_CIRCLE) state = STATE_MENU;
-        if (pressed & PSP_CTRL_CROSS) { rebuildAll(); state = STATE_TRACK; }
+        prevB=pad->Buttons;
+        int old=charSel;
+        if(pressed & PSP_CTRL_LEFT) charSel=nextUnlockedChar(charSel,-1);
+        if(pressed & PSP_CTRL_RIGHT) charSel=nextUnlockedChar(charSel,1);
+        if(charSel!=old) rebuildAll();
+        if(pressed & PSP_CTRL_CIRCLE) state=(isChampMode()?STATE_CUPSELECT:STATE_DIFF);
+        if(pressed & PSP_CTRL_CROSS) {
+            if(isChampMode()) { champRace=0; trackSel=cupTracks[cupSel][0]; rebuildAll(); }
+            else state=STATE_TRACK;
+        }
         return;
     }
     if (state == STATE_TRACK) {
-        prevB = pad->Buttons;
-        int old = trackSel;
-        if (pressed & PSP_CTRL_LEFT) trackSel = (trackSel + NTRACKS - 1) % NTRACKS;
-        if (pressed & PSP_CTRL_RIGHT) trackSel = (trackSel + 1) % NTRACKS;
-        if (trackSel != old) { rebuildAll(); state = STATE_TRACK; }
-        if (pressed & PSP_CTRL_CIRCLE) state = STATE_CHAR;
-        if (pressed & PSP_CTRL_CROSS) rebuildAll();     /* geri sayim baslar */
+        prevB=pad->Buttons;
+        int old=trackSel;
+        if(pressed & PSP_CTRL_LEFT) trackSel=nextUnlockedTrack(trackSel,-1);
+        if(pressed & PSP_CTRL_RIGHT) trackSel=nextUnlockedTrack(trackSel,1);
+        if(pressed & PSP_CTRL_TRIANGLE) skyPhase=(skyPhase+1)%3;
+        if(trackSel!=old) rebuildAll();
+        if(pressed & PSP_CTRL_CIRCLE) state=STATE_CHAR;
+        if(pressed & PSP_CTRL_CROSS) rebuildAll();
         return;
     }
 
@@ -1672,9 +1913,17 @@ static void update(SceCtrlData *pad) {
     if (state == 1 && (pressed & PSP_CTRL_TRIANGLE))
         cameraMode = (cameraMode + 1) % 3;
 
+    if (state == STATE_CUPRESULT) {
+        prevB=pad->Buttons;
+        if(pressed & PSP_CTRL_CIRCLE) { state=STATE_MENU; return; }
+        if(pressed & (PSP_CTRL_START|PSP_CTRL_CROSS)) {
+            if(champRace < CHAMP_RACES) { trackSel=cupTracks[cupSel][champRace]; rebuildAll(); }
+        }
+        return;
+    }
     /* SELECT provides a quick restart after the finish. */
     if (state == 2 && (pressed & PSP_CTRL_SELECT)) { rebuildAll(); return; }
-    if (state == 2 && (pressed & PSP_CTRL_START)) { rebuildAll(); return; }
+    if (state == 2 && (pressed & PSP_CTRL_START)) { state=STATE_MENU; return; }
 
     prevB = pad->Buttons;
 
@@ -1777,8 +2026,21 @@ static void update(SceCtrlData *pad) {
                 for (int i = 0; i < nthings; i++) if (things[i].type == TH_CONE) things[i].active = 1;
             }
             if (p->prog >= LAPS * TL) {
-                state = 2; finalRank = (gameMode == GAME_RACE) ? calcRank() : 1; finalTime = raceTime;
+                finalRank = (gameMode == GAME_TIME_TRIAL) ? 1 : calcRank();
+                finalTime = raceTime;
                 finishRace(finalTime, finalRank);
+                if (isChampMode()) {
+                    applyChampionshipRacePoints();
+                    champRace++;
+                    if (champRace < CHAMP_RACES) {
+                        state = STATE_CUPRESULT;
+                        triggerSfx(SFX_FINISH);
+                    } else {
+                        awardChampionship();
+                        state = 2;
+                        triggerSfx(SFX_FINISH);
+                    }
+                } else { state=2; triggerSfx(SFX_FINISH); }
             }
         }
     }
@@ -1815,11 +2077,33 @@ static void render3D(void) {
     ctr.x = p->x + cosf(camH) * targetD; ctr.y = targetY; ctr.z = p->z + sinf(camH) * targetD;
     up.x = 0; up.y = 1; up.z = 0;
 
-    /* gokyuzu */
+    /* gokyuzu: day / sunset / night textureli skybox katmani */
     sceGuDisable(GU_DEPTH_TEST);
     sceGuDisable(GU_FOG);
-    vgrad(0, 0, W, 150, SKYTOP, HAZE);
-    rect(0, 150, W, H - 150, HAZE);
+    const PspTexture *skyTex = (skyPhase==0)?texSkyDay:((skyPhase==1)?texSkySunset:texSkyNight);
+    if (skyTex && skyTex->ready) {
+        drawTexRect(skyTex,0,0,W,H,0,0,(float)skyTex->w,(float)skyTex->h,RGBA(255,255,255,255));
+    } else {
+        unsigned st=SKYTOP, hz=HAZE;
+        if(skyPhase==1){ st=mixc(st,RGB(245,100,40),0.52f); hz=mixc(hz,RGB(255,180,90),0.55f); }
+        if(skyPhase==2){ st=mixc(st,RGB(8,12,42),0.80f); hz=mixc(hz,RGB(35,45,85),0.65f); }
+        vgrad(0,0,W,150,st,hz); rect(0,150,W,H-150,hz);
+    }
+    /* hareketli bulutlar, ekran uzayinda hafif parallax */
+    if (skyPhase != 2 && texCloud && texCloud->ready) {
+        for(int ci=0;ci<5;ci++){
+            float cx=fmodf(ci*122.0f + tAnim*(6.0f+ci) + skyScroll*35.0f,W+120.0f)-60.0f;
+            float cy=28.0f + (ci%3)*28.0f;
+            drawTexRect(texCloud,cx,cy,96,42,0,0,(float)texCloud->w,(float)texCloud->h,RGBA(255,255,255,185));
+        }
+    }
+
+    /* uzak dag panoramasi: hareket etmeyen 3 katman yerine hafif kayan texture */
+    if (texMountain && texMountain->ready) {
+        float mx=fmodf(-tAnim*3.0f + skyScroll*12.0f, (float)W);
+        drawTexRect(texMountain,mx-2*W/3.0f,116,W*0.92f,72,0,0,(float)texMountain->w,(float)texMountain->h,RGBA(255,255,255,220));
+        drawTexRect(texMountain,mx+W/4.0f,126,W*0.92f,64,0,0,(float)texMountain->w,(float)texMountain->h,RGBA(225,235,255,180));
+    }
 
     sceGumMatrixMode(GU_PROJECTION);
     sceGumLoadIdentity();
@@ -1841,16 +2125,14 @@ static void render3D(void) {
     sceGuTexOffset(0.0f, 0.0f);
     /* zemin (cim dokusu) */
     sceGuEnable(GU_TEXTURE_2D);
-    sceGuTexImage(0, 64, 64, 64, texGrass);
-    sceGuTexFlush();
+    bindTexture(texGrassFile, texGrass);
     sceGumDrawArray(GU_TRIANGLES, VF3, groundEnd, 0, mesh);
     sceGuDisable(GU_TEXTURE_2D);
     /* cim seritleri + rumble (duz renk) */
     sceGumDrawArray(GU_TRIANGLES, VF3, roadStart - groundEnd, 0, &mesh[groundEnd]);
     /* yol (asfalt dokusu) */
     sceGuEnable(GU_TEXTURE_2D);
-    sceGuTexImage(0, 64, 64, 64, texRoad);
-    sceGuTexFlush();
+    bindTexture(texRoadFile, texRoad);
     sceGumDrawArray(GU_TRIANGLES, VF3, roadEnd - roadStart, 0, &mesh[roadStart]);
     sceGuDisable(GU_TEXTURE_2D);
     /* turbo seritleri, cizgiler, baslangic (duz renk) */
@@ -1874,7 +2156,7 @@ static void render3D(void) {
         modelAt(k->x, bob, k->z, yaw);
         sceGumRotateX(k->pitch);
         sceGumRotateZ(k->lean);
-        sceGumDrawArray(GU_TRIANGLES, VF3, kartCnt[i], 0, &mesh[kartStart[i]]);
+        sceGumDrawArray(GU_TRIANGLES, VF3, kartCount, 0, &mesh[kartStart[i]]);
         if (k->boostT > 0) {
             ScePspFVector3 t, sc;
             t.x = -1.9f; t.y = 0.7f + 0.05f * sinf(tAnim * 32.0f + i); t.z = 0;
@@ -1950,10 +2232,58 @@ static void drawMush(float x, float y, float s) {
     rect(x + s * 0.8f, y + s * 0.5f, s * 0.4f, s * 0.35f, RGB(255, 255, 255));
 }
 
+static int atlasCellForItem(int item) {
+    switch(item) {
+    case ITEM_MUSH: return 0; case ITEM_GREENSHELL: return 1; case ITEM_REDSHELL: return 2; case ITEM_BANANA: return 3;
+    case ITEM_LIGHT: return 4; case ITEM_SHIELD: return 5; case ITEM_STAR: return 6; default: return 7; }
+}
+
 static void drawHUD(void) {
     char buf[40];
     Kart *p = &K[0];
 
+    if (state == STATE_STATS) {
+        rect(0,0,W,H,RGBA(0,0,0,180));
+        text(W/2-textWidth("ISTATISTIK",16,5)/2,10,16,28,5,"ISTATISTIK",RGB(255,220,50));
+        snprintf(buf,sizeof(buf),"WINS %d",saveData.totalWins); text(42,58,10,16,3,buf,RGB(255,255,255));
+        snprintf(buf,sizeof(buf),"RACES %d",saveData.totalRaces); text(42,82,10,16,3,buf,RGB(200,220,240));
+        snprintf(buf,sizeof(buf),"ITEMS %d",saveData.totalItems); text(42,106,10,16,3,buf,RGB(200,220,240));
+        snprintf(buf,sizeof(buf),"HITS %d",saveData.totalHits); text(42,130,10,16,3,buf,RGB(200,220,240));
+        snprintf(buf,sizeof(buf),"BOOSTS %d",saveData.totalBoosts); text(42,154,10,16,3,buf,RGB(200,220,240));
+        snprintf(buf,sizeof(buf),"CAREER %d",saveData.careerLevel); text(250,58,10,16,3,buf,RGB(120,240,255));
+        snprintf(buf,sizeof(buf),"CHAR %d/%d",countUnlocked(saveData.unlockedChars,NK),NK); text(250,82,10,16,3,buf,RGB(200,220,240));
+        snprintf(buf,sizeof(buf),"TRACK %d/%d",countUnlocked(saveData.unlockedTracks,NTRACKS),NTRACKS); text(250,106,10,16,3,buf,RGB(200,220,240));
+        snprintf(buf,sizeof(buf),"CUP %d/%d",countUnlocked(saveData.unlockedCups,NCUPS),NCUPS); text(250,130,10,16,3,buf,RGB(200,220,240));
+        snprintf(buf,sizeof(buf),"G %d  S %d  B %d",saveData.cupsGold,saveData.cupsSilver,saveData.cupsBronze); text(190,174,10,16,3,buf,RGB(255,220,100));
+        text(W/2-textWidth("O/START: GERI",9,3)/2,236,9,14,3,"O/START: GERI",RGB(180,210,235));
+        return;
+    }
+    if (state == STATE_DIFF) {
+        rect(0,0,W,H,RGBA(0,0,0,170));
+        text(W/2-textWidth("ZORLUK",18,6)/2,20,18,30,6,"ZORLUK",RGB(255,220,50));
+        for(int i=0;i<4;i++){
+            int bx=30+i*108; if(i==diffSel) rect(bx-4,92,100,56,RGB(255,220,50));
+            rect(bx,96,92,48,RGBA(20,50,100,220));
+            text(bx+8,109,10,16,3,diffNames[i],i==diffSel?RGB(255,255,255):RGB(170,190,210));
+        }
+        snprintf(buf,sizeof(buf),"SKY %s",skyPhase==0?"DAY":(skyPhase==1?"SUNSET":"NIGHT"));
+        text(W/2-textWidth(buf,10,3)/2,176,10,16,3,buf,RGB(255,230,120));
+        text(W/2-textWidth("SOL SAG SEC   X DEVAM   O GERI   Ucgen SKY",7,2)/2,240,7,12,2,"SOL SAG SEC   X DEVAM   O GERI   Ucgen SKY",RGB(205,220,235));
+        return;
+    }
+    if (state == STATE_CUPSELECT) {
+        rect(0,0,W,H,RGBA(0,0,0,175));
+        text(W/2-textWidth("KUPA SEC",16,5)/2,14,16,28,5,"KUPA SEC",RGB(255,220,50));
+        for(int i=0;i<NCUPS;i++){
+            int bx=30+i*145; int locked=(gameMode==GAME_CAREER && !cupUnlocked(i));
+            if(i==cupSel) rect(bx-4,82,132,70,RGB(255,220,50));
+            rect(bx,86,124,62,locked?RGBA(35,35,45,230):RGBA(25,70,120,230));
+            text(bx+10,98,8,14,2,locked?"LOCKED":cupNames[i],locked?RGB(255,90,90):RGB(255,255,255));
+            for(int r=0;r<4;r++){ int tr=cupTracks[i][r]; rect(bx+12+r*25,124,20,12,kBody[(tr+1)%NK]); }
+        }
+        text(W/2-textWidth("SOL SAG   X BASLA   O GERI",8,2)/2,236,8,14,2,"SOL SAG   X BASLA   O GERI",RGB(205,220,235));
+        return;
+    }
     /* Karakter secimi */
     if (state == STATE_CHAR) {
         rect(0, 0, W, H, RGBA(0, 0, 0, 150));
@@ -1961,20 +2291,15 @@ static void drawHUD(void) {
         for (int i = 0; i < NK; i++) {
             int bx = 30 + i * 72, by = 52;
             if (i == charSel) rect(bx - 4, by - 4, 64, 72, RGB(255, 220, 50));
-            rect(bx, by, 56, 64, RGBA(20, 30, 60, 235));
-            rect(bx + 17, by + 8, 22, 18, kSkin[i]);                    /* yuz */
-            rect(bx + 15, by + 3, 26, 8, kHat[i]);                      /* sapka / sac */
-            if (i == 3) { rect(bx + 11, by + 1, 34, 9, kHat[i]); rect(bx + 24, by + 2, 8, 4, RGB(225, 35, 35)); }
-            if (i == 5) { rect(bx + 17, by - 1, 4, 6, RGB(250, 250, 250)); rect(bx + 35, by - 1, 4, 6, RGB(250, 250, 250)); }
-            rect(bx + 23, by + 16, 3, 3, RGB(30, 30, 34));
-            rect(bx + 30, by + 16, 3, 3, RGB(30, 30, 34));
-            if (i <= 1) rect(bx + 22, by + 21, 12, 2, RGB(80, 45, 20));  /* biyik */
-            rect(bx + 6, by + 28, 44, 14, kBody[i]);
-            rect(bx + 4, by + 40, 12, 12, RGB(30, 30, 34));
-            rect(bx + 40, by + 40, 12, 12, RGB(30, 30, 34));
-            rect(bx + 6, by + 54, 44, 4, scol(kBody[i], 0.6f));
+            rect(bx, by, 56, 64, charUnlocked(i) ? RGBA(20, 30, 60, 235) : RGBA(18,18,25,235));
+            rect(bx + 6, by + 14, 44, 18, charUnlocked(i) ? kBody[i] : RGB(70,70,78));
+            rect(bx + 12, by + 8, 16, 8, kTrim[i]);
+            rect(bx + 4, by + 30, 12, 12, RGB(30, 30, 34));
+            rect(bx + 40, by + 30, 12, 12, RGB(30, 30, 34));
+            rect(bx + 6, by + 46, 44, 4, scol(kBody[i], 0.6f));
         }
-        text(W / 2 - textWidth(charNames[charSel], 18, 5) / 2, 132, 18, 30, 5, charNames[charSel], RGB(255, 255, 255));
+        if(charUnlocked(charSel)) text(W / 2 - textWidth(charNames[charSel], 18, 5) / 2, 132, 18, 30, 5, charNames[charSel], RGB(255, 255, 255));
+        else text(W / 2 - textWidth("LOCKED", 18, 5) / 2, 132, 18, 30, 5, "LOCKED", RGB(255, 90, 90));
         {
             static const char *lbl[3] = { "SPEED", "ACCEL", "TURN" };
             float vals[3] = { cSpd[charSel], cAcc[charSel], cTrn[charSel] };
@@ -1994,7 +2319,9 @@ static void drawHUD(void) {
         rect(0, H - 76, W, 76, RGBA(0, 0, 0, 170));
         text(W / 2 - textWidth("PIST SEC", 14, 4) / 2, 8, 14, 24, 4, "PIST SEC", RGB(255, 220, 50));
         snprintf(buf, sizeof(buf), "%d/%d  %s", trackSel + 1, NTRACKS, themes[trackSel].name);
-        text(W / 2 - textWidth(buf, 10, 3) / 2, 40, 10, 16, 3, buf, RGB(255, 255, 255));
+        text(W / 2 - textWidth(buf, 10, 3) / 2, 40, 10, 16, 3, buf, trackUnlocked(trackSel) || !careerActive ? RGB(255,255,255) : RGB(255,90,90));
+        snprintf(buf, sizeof(buf), "%s  %s", diffNames[diffSel], mirrorMode?"MIRROR":"NORMAL");
+        text(W / 2 - textWidth(buf, 8, 2) / 2, 60, 8, 12, 2, buf, RGB(255,220,120));
         {
             float bt = (gameMode == GAME_RACE) ? saveData.bestRace[trackSel] : saveData.bestTT[trackSel];
             if (bt > 0) {
@@ -2015,30 +2342,28 @@ static void drawHUD(void) {
         int mw = (int)(30 * mp), mh = (int)(50 * mp);
         text(W / 2 - textWidth("MARIO KART PSP", mw, 8) / 2, 38 - (mh - 50) / 2, mw, mh, 8, "MARIO KART PSP", RGB(255, 220, 50));
         {
-            static const char *names[2] = { "TEK KISILIK", "TIME TRIAL" };
-            for (int i = 0; i < 2; i++) {
-                int by = 96 + i * 44;
+            static const char *names[5] = { "TEK KISILIK", "TIME TRIAL", "CHAMPIONSHIP", "CAREER", "ISTATISTIK" };
+            for (int i = 0; i < 5; i++) {
+                int by = 72 + i * 30;
                 int sel = (menuSel == i);
                 if (sel) rect(W / 2 - 134, by - 4, 268, 40, RGB(255, 220, 50));
-                rect(W / 2 - 130, by, 260, 32, sel ? RGBA(20, 70, 150, 240) : RGBA(20, 50, 100, 160));
-                text(W / 2 - textWidth(names[i], 14, 4) / 2, by + 5, 14, 22, 4, names[i],
+                rect(W / 2 - 130, by, 260, 26, sel ? RGBA(20, 70, 150, 240) : RGBA(20, 50, 100, 160));
+                text(W / 2 - textWidth(names[i], 11, 3) / 2, by + 4, 11, 18, 3, names[i],
                      sel ? RGB(255, 255, 255) : RGB(170, 185, 205));
             }
         }
-        text(W / 2 - textWidth("X: DEVAM", 11, 3) / 2, 188, 11, 18, 3, "X: DEVAM", RGB(120, 240, 255));
-        if (menuSel == GAME_RACE)
-            text(W / 2 - textWidth("5 BOT YARISMACI", 10, 3) / 2, 212, 10, 16, 3, "5 BOT YARISMACI", RGB(230, 230, 230));
-        else
-            text(W / 2 - textWidth("BOT YOK  GHOST", 10, 3) / 2, 212, 10, 16, 3, "BOT YOK  GHOST", RGB(230, 230, 230));
-        text(W / 2 - textWidth("PSP kontrol ve ozel guc sistemi", 8, 2) / 2, 240, 8, 14, 2, "PSP kontrol ve ozel guc sistemi", RGB(180, 200, 220));
+        text(W / 2 - textWidth("X: DEVAM", 11, 3) / 2, 228, 11, 18, 3, "X: DEVAM", RGB(120, 240, 255));
+        if (menuSel == GAME_TIME_TRIAL) text(W/2-textWidth("GHOST TIME TRIAL",9,3)/2,246,9,14,3,"GHOST TIME TRIAL",RGB(255,230,120));
+        else if (menuSel == GAME_CHAMPIONSHIP) text(W/2-textWidth("4 YARIS PUAN KUPA",9,3)/2,246,9,14,3,"4 YARIS PUAN KUPA",RGB(255,230,120));
+        else if (menuSel == GAME_CAREER) text(W/2-textWidth("ACILABILIR KARAKTER PIST KUPA",8,2)/2,246,8,14,2,"ACILABILIR KARAKTER PIST KUPA",RGB(255,230,120));
+        else text(W/2-textWidth("PSP KART YARISI",9,3)/2,246,9,14,3,"PSP KART YARISI",RGB(255,230,120));
         return;
     }
     if (gameMode == GAME_RACE) {
         int rank = (state == 2) ? finalRank : calcRank();
         snprintf(buf, sizeof(buf), "POS %d/%d", rank, NK);
         text(8, 8, 11, 18, 3, buf, rank == 1 ? RGB(255, 215, 40) : RGB(255, 255, 255));
-        snprintf(buf, sizeof(buf), "%s  5 BOT", charNames[charSel]);
-        text(8, 28, 8, 14, 2, buf, RGB(120, 220, 255));
+        text(8, 28, 8, 14, 2, "5 BOT", RGB(120, 220, 255));
     } else {
         text(8, 8, 8, 14, 2, "TIME TRIAL", RGB(255, 215, 40));
         if (saveData.bestTT[trackSel] > 0) {
@@ -2051,6 +2376,8 @@ static void drawHUD(void) {
     if (saveData.bestLap[trackSel] > 0) snprintf(buf, sizeof(buf), "BEST %.1f", saveData.bestLap[trackSel]);
     else snprintf(buf, sizeof(buf), "BEST --");
     text(8, 50, 8, 14, 3, buf, RGB(255, 255, 255));
+    if(isChampMode()) { snprintf(buf,sizeof(buf),"%s %d/%d  %s",cupNames[cupSel],champRace+1,CHAMP_RACES,diffNames[diffSel]); text(170,50,8,14,2,buf,RGB(255,220,100)); }
+    else { snprintf(buf,sizeof(buf),"%s",diffNames[diffSel]); text(170,50,8,14,2,buf,RGB(255,220,100)); }
     snprintf(buf, sizeof(buf), "LAP %d/%d", lap, LAPS);
     text(W - 8 - textWidth(buf, 11, 3), 8, 11, 18, 3, buf, RGB(255, 255, 255));
 
@@ -2078,6 +2405,7 @@ static void drawHUD(void) {
         rect(8, H - 58, 82, 24, RGBA(0, 0, 0, 170));
         float ip = 0.85f + 0.15f * (0.5f + 0.5f * sinf(tAnim * 8.0f));
         rect(10, H - 56, 18, 20, scol(itemColor(p->item), ip));
+        drawAtlasIcon(atlasCellForItem(p->item), 10, H - 56, 20, RGBA(255,255,255,255));
         snprintf(buf, sizeof(buf), "%s", itemName(p->item));
         text(34, H - 54, 8, 14, 3, buf, RGB(255, 255, 255));
         text(12, H - 34, 7, 12, 2, "O:USE", RGB(255, 230, 70));
@@ -2162,8 +2490,24 @@ static void drawHUD(void) {
         text(W / 2 - textWidth(buf, 24, 6) / 2, 142, 24, 40, 6, buf, medal);
         if (newRecord && (((int)(tAnim * 3)) & 1))
             text(W / 2 - textWidth("RECORD", 11, 3) / 2, 46, 11, 18, 3, "RECORD", RGB(255, 220, 50));
+        if(isChampMode()) {
+            const char *mn = champMedal==3?"GOLD":(champMedal==2?"SILVER":"BRONZE");
+            text(W/2-textWidth(mn,12,4)/2,46,12,22,4,mn,champMedal==3?RGB(255,215,40):(champMedal==2?RGB(215,220,230):RGB(205,140,80)));
+            snprintf(buf,sizeof(buf),"CUP POINTS %d",champPoints[0]);
+            text(W/2-textWidth(buf,9,3)/2,124,9,16,3,buf,RGB(120,240,255));
+        }
         if (((int)(tAnim * 2)) & 1)
             text(W / 2 - textWidth("PRESS START", 11, 3) / 2, 194, 11, 18, 3, "PRESS START", RGB(255, 255, 255));
+    }
+    if (state == STATE_CUPRESULT) {
+        rect(0,64,W,160,RGBA(0,0,0,185));
+        snprintf(buf,sizeof(buf),"%s  %d/%d",cupNames[cupSel],champRace,CHAMP_RACES);
+        text(W/2-textWidth(buf,12,4)/2,76,12,22,4,buf,RGB(255,220,50));
+        snprintf(buf,sizeof(buf),"RACE PLACE %d",finalRank);
+        text(W/2-textWidth(buf,11,3)/2,112,11,18,3,buf,RGB(255,255,255));
+        snprintf(buf,sizeof(buf),"POINTS %d",champPoints[0]);
+        text(W/2-textWidth(buf,11,3)/2,138,11,18,3,buf,RGB(120,240,255));
+        if(champRace<CHAMP_RACES) text(W/2-textWidth("START/X: NEXT RACE",10,3)/2,176,10,16,3,"START/X: NEXT RACE",RGB(255,230,120));
     }
 }
 
@@ -2212,6 +2556,7 @@ int main(void) {
     charSel = saveData.lastChar;
     trackSel = saveData.lastTrack;
     makeTextures();
+    loadTextureBank();
     startAudio();
     initGraphics();
     sceCtrlSetSamplingCycle(0);
@@ -2228,6 +2573,7 @@ int main(void) {
         aBoost = K[0].boostT > 0;
         aEngineOn = (state == 0 || state == 1);
         aTrackId = trackSel;
+        aMusicScene = (state==STATE_MENU || state==STATE_CHAR || state==STATE_TRACK || state==STATE_DIFF || state==STATE_CUPSELECT || state==STATE_STATS) ? 0 : ((state==2 || state==STATE_CUPRESULT) ? 2 : 1);
         render();
     }
     return 0;
